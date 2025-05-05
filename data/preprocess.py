@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 from scipy.io import loadmat, savemat
 from scipy.signal import convolve2d
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 
 def gaussian_kernel(size=11, sigma=1.67):
@@ -58,3 +60,20 @@ def normalization(filename: str) -> None:
     save_path = os.path.join("data", "processed", "normalized", filename)
     savemat(save_path, {last_key: data})
 
+
+def pca(filename: str, components: int = 30) -> None:
+    file_path = os.path.join("data", "processed", "smoothed", filename)
+    file_dict = loadmat(file_path)
+    last_key = list(file_dict)[-1]
+    data = file_dict[last_key]
+
+    _, _, c = data.shape
+    data_reshaped = data.reshape(-1, c)
+
+    scaler = StandardScaler()
+    data_scaled = scaler.fit_transform(data_reshaped)
+    pca_values = PCA(n_components=components)
+    data_pca = pca_values.fit_transform(data_scaled)
+
+    save_path = os.path.join("data", "processed", "pca", filename)
+    savemat(save_path, {last_key: data_pca})
