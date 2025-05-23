@@ -6,7 +6,7 @@ from utils.util_functions import stratified_sample_minimum
 
 
 class HyperspectralDataset(Dataset):
-    def __init__(self, data, labels, pca):
+    def __init__(self, data, labels, pca=None):
         self.data = data
         self.labels = labels
         self.pca = pca
@@ -34,6 +34,9 @@ def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray,
     pca = pca[mask]
     ground_truth = ground_truth[mask]
 
+    # change the ground_truth to one lower
+    ground_truth -= 1
+
     train_idx = stratified_sample_minimum(
         labels=ground_truth,
         min_per_class=3,
@@ -43,7 +46,7 @@ def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray,
     temp_idx = np.setdiff1d(np.arange(len(dataset)), train_idx)
 
     dataset_train = torch.from_numpy(dataset[train_idx].astype(np.float32))
-    labels_train = torch.from_numpy(ground_truth[train_idx].astype(np.int64))
+    labels_train = torch.from_numpy(ground_truth[train_idx].astype(np.int64)).unsqueeze(1)  # (N, 1)
     pca_train = torch.from_numpy(pca[train_idx].astype(np.float32))
 
     train_dataset = HyperspectralDataset(dataset_train, labels_train, pca_train)
@@ -55,15 +58,6 @@ def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray,
     labels_temp_tensor = torch.from_numpy(labels_temp.astype(np.int64))
 
     if valid:
-        '''
-        valid_idx, test_idx = train_test_split(
-            np.arange(len(dataset_temp)),
-            stratify=labels_temp,
-            train_size=val_size,
-            random_state=random_state,
-        )
-        '''
-
         valid_idx = stratified_sample_minimum(
             labels=labels_temp,
             min_per_class=3,
@@ -73,21 +67,21 @@ def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray,
         test_idx = np.setdiff1d(np.arange(len(dataset_temp)), valid_idx)
 
         dataset_val = dataset_temp_tensor[valid_idx]
-        labels_val = labels_temp_tensor[valid_idx]
+        labels_val = labels_temp_tensor[valid_idx].unsqueeze(1)
 
         dataset_test = dataset_temp_tensor[test_idx]
-        labels_test = labels_temp_tensor[test_idx]
+        labels_test = labels_temp_tensor[test_idx].unsqueeze(1)
 
-        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor, None)
-        test_dataset = HyperspectralDataset(dataset_test, labels_test, None)
-        val_dataset = HyperspectralDataset(dataset_val, labels_val, None)
+        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor.unsqueeze(1))
+        test_dataset = HyperspectralDataset(dataset_test, labels_test)
+        val_dataset = HyperspectralDataset(dataset_val, labels_val)
 
         return train_dataset, temp_dataset, test_dataset, val_dataset
     else:
         dataset_test = dataset_temp_tensor
-        labels_test = labels_temp_tensor
+        labels_test = labels_temp_tensor.unsqueeze(1)
 
-        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor, None)
-        test_dataset = HyperspectralDataset(dataset_test, labels_test, None)
+        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor.unsqueeze(1))
+        test_dataset = HyperspectralDataset(dataset_test, labels_test)
 
         return train_dataset, temp_dataset, test_dataset

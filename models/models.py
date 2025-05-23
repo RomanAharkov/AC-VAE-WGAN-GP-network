@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
 import math
+import torch.nn.functional as F
 
 
 class Generator(nn.Module):
     def __init__(self, class_num: int, latent_dim: int, c: int, mode="PCA"):
         super().__init__()
+        self.class_num = class_num
         n = math.floor(c/16)  # 12
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
@@ -28,9 +30,12 @@ class Generator(nn.Module):
     def forward(self, noise, c, pca=None):
         """
         noise = (batch_size, latent_dim)
-        c = (batch_size, class_num)
+        c = (batch_size, 1)
         pca = (batch_size, 30) | None
         """
+        c = c.squeeze(1).long()  # (batch_size)
+        c = F.one_hot(c, num_classes=self.class_num)
+
         if pca is not None:
             x = torch.cat([noise, c, pca], dim=1)
         else:
@@ -75,12 +80,12 @@ class Discriminator(nn.Module):
 
 
 class Classifier(nn.Module):
-    def __init__(self, num_classes: int):
+    def __init__(self, class_num: int):
         super().__init__()
         self.tanh = nn.Tanh()
         self.flatten = nn.Flatten()
         self.conv1 = nn.Conv1d(1, 64, 15, 15, padding=7)  # 200 (204) x 1 -> 14 x 64
-        self.fc = nn.Linear(64 * 14, num_classes)
+        self.fc = nn.Linear(64 * 14, class_num)
 
     def forward(self, x):
         """
@@ -117,6 +122,6 @@ class Encoder(nn.Module):
         x = self.leaky_relu(self.bn2(self.conv2(x)))  # (batch_size, 64, c/4)
         x = self.leaky_relu(self.bn3(self.conv3(x)))  # (batch_size, 128, c/8)
         x = self.flatten(x)  # (batch_size, 16c)
-        mu = self.fc1(x)
-        log_s = self.fc2(x)
+        mu = self.fc1(x)  # (batch_size, latent_dim)
+        log_s = self.fc2(x)  # (batch_size, latent_dim)
         return mu, log_s

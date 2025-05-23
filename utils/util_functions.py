@@ -1,7 +1,9 @@
+from typing import Iterator
 import numpy as np
 import torch
 from collections import Counter
-from torch.utils.data import Dataset
+from torch import Tensor
+from torch.utils.data import Dataset, DataLoader
 
 
 def stratified_sample_minimum(labels: np.ndarray, min_per_class: int = 3, total_samples: int = 200, random_state=10) \
@@ -56,6 +58,23 @@ def stratified_sample_minimum(labels: np.ndarray, min_per_class: int = 3, total_
 
     rng.shuffle(selected_indices)
     return np.array(selected_indices)
+
+
+def get_next_batch(iterator: Iterator, dataloader: DataLoader):
+    try:
+        inputs, labels, pca = next(iterator)
+    except StopIteration:
+        iterator = iter(dataloader)
+        inputs, labels, pca = next(iterator)
+    return inputs, labels, pca, iterator
+
+
+def reparameterize(mu: Tensor, log_var: Tensor):
+    std = torch.exp(0.5 * log_var)
+    eps = torch.randn_like(std)
+    z = mu + eps * std
+    return z
+
 
 
 def print_class_distribution(dataset: Dataset):
