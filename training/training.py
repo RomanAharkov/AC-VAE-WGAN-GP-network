@@ -227,10 +227,11 @@ def train_models(num_epochs: int, class_num: int, latent_dim: int, channels: int
             logging(mean_disc_loss, vae_loss.item(), cls_loss.item(), rec_loss.item(), kl_div_loss.item(), inputs,
                     fake_data.squeeze(1))  # logging
 
-        gen_sch.step()
-        disc_sch.step()
-        if enc_sch:
-            enc_sch.step()
+        if start_epoch + epoch < t_max:
+            gen_sch.step()
+            disc_sch.step()
+            if enc_sch:
+                enc_sch.step()
 
         if epoch % online_epochs == 0 and start_epoch + epoch >= online_start:
             save_models(experiment_name, disc, disc_opt, disc_sch, gen, gen_opt, gen_sch, cls, cls_opt, enc, enc_opt,

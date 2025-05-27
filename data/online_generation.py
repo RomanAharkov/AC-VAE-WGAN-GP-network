@@ -10,8 +10,9 @@ import numpy as np
 def generate(gen: Module, dataset: Dataset, num_full_passes: int, batch_size: int, mode: str, enc: Module or None,
              device: str, folder_name: str):
 
-    Path(f"experiments/{folder_name}").mkdir(parents=True, exist_ok=True)
+    Path(f"experiments/{folder_name}/online").mkdir(parents=True, exist_ok=True)
     all_data = []
+    label_data = []
 
     gen.eval()
     if enc:
@@ -48,19 +49,26 @@ def generate(gen: Module, dataset: Dataset, num_full_passes: int, batch_size: in
                 z = reparameterize(mu, log_s)
                 fake_data = gen(z, labels, None)  # (B, 1, C)
 
+        labels = labels.cpu().numpy()  # (B, 1)
         save_data = fake_data.cpu().squeeze(1).numpy()  # (B, C)
         all_data.append(save_data)
+        label_data.append(labels)
 
+    label_data = np.vstack(label_data)  # (total, 1)
     save_data = np.vstack(all_data)  # (total, C)
     filepath = Path(f"experiments/{folder_name}/online_data.mat")
-    key = "data"
+    data_key = "data"
+    label_key = "labels"
     if filepath.exists():
         file_dict = loadmat(str(filepath))
-        loaded_data = file_dict[key]
+        loaded_data = file_dict[data_key]
+        loaded_labels = file_dict[label_key]
         combined = np.concatenate([loaded_data, save_data], axis=0)
+        combined_labels = np.concatenate([loaded_labels, label_data], axis=0)
     else:
         combined = save_data
+        combined_labels = label_data
 
-    savemat(str(filepath), {key: combined})
+    savemat(str(filepath), {data_key: combined, label_key: combined_labels})
 
     gen.train()

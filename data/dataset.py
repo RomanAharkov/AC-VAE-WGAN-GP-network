@@ -8,7 +8,7 @@ from utils.util_functions import stratified_sample_minimum
 class HyperspectralDataset(Dataset):
     def __init__(self, data, labels, pca=None):
         self.data = data
-        self.labels = labels
+        self.labels = labels  # (N, 1)
         self.pca = pca
 
     def __len__(self):
