@@ -6,7 +6,7 @@ from utils.util_functions import stratified_sample_minimum
 
 
 class HyperspectralDataset(Dataset):
-    def __init__(self, data, labels, pca=None):
+    def __init__(self, data, labels, pca):
         self.data = data
         self.labels = labels  # (N, 1)
         self.pca = pca
@@ -17,12 +17,12 @@ class HyperspectralDataset(Dataset):
     def __getitem__(self, idx):
         x = self.data[idx]
         y = self.labels[idx]
-        pca = self.pca[idx] if self.pca is not None else None
+        pca = self.pca[idx]
         return x, y, pca
 
 
-def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray, valid: bool = False,
-                 train_size: int = 215, val_size: int = 1000, random_state=10) -> tuple[HyperspectralDataset, ...]:
+def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray, stratified: bool,
+                 train_size: int = 215) -> tuple[HyperspectralDataset, ...]:
     # reshape the data into (N, C) or (N, 1)
     w, h, c = dataset.shape
     dataset = dataset.reshape((w * h, -1))
@@ -37,51 +37,114 @@ def get_datasets(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray,
     # change the ground_truth to one lower
     ground_truth -= 1
 
-    train_idx = stratified_sample_minimum(
-        labels=ground_truth,
-        min_per_class=3,
-        total_samples=train_size,
-        random_state=random_state
-    )
-    temp_idx = np.setdiff1d(np.arange(len(dataset)), train_idx)
+    if stratified:
+        train_idx = stratified_sample_minimum(
+            labels=ground_truth,
+            min_per_class=3,
+            total_samples=train_size
+        )
+    else:
+        train_idx = np.random.choice(len(dataset), size=train_size, replace=False)
 
-    dataset_train = torch.from_numpy(dataset[train_idx].astype(np.float32))
-    labels_train = torch.from_numpy(ground_truth[train_idx].astype(np.int64)).unsqueeze(1)  # (N, 1)
-    pca_train = torch.from_numpy(pca[train_idx].astype(np.float32))
+    test_idx = np.setdiff1d(np.arange(len(dataset)), train_idx)
+
+    dataset_train = torch.tensor(dataset[train_idx], dtype=torch.float32)
+    labels_train = torch.tensor(ground_truth[train_idx], dtype=torch.long).unsqueeze(1)
+    pca_train = torch.tensor(pca[train_idx], dtype=torch.float32)
 
     train_dataset = HyperspectralDataset(dataset_train, labels_train, pca_train)
 
-    dataset_temp = dataset[temp_idx]
-    labels_temp = ground_truth[temp_idx]
+    dataset_test = dataset[test_idx]
+    labels_test = ground_truth[test_idx]
+    pca_test = pca[test_idx]
 
-    dataset_temp_tensor = torch.from_numpy(dataset_temp.astype(np.float32))
-    labels_temp_tensor = torch.from_numpy(labels_temp.astype(np.int64))
+    dataset_test_tensor = torch.tensor(dataset_test, dtype=torch.float32)
+    labels_test_tensor = torch.tensor(labels_test, dtype=torch.long)
+    pca_test_tensor = torch.tensor(pca_test, dtype=torch.float32)
 
-    if valid:
-        valid_idx = stratified_sample_minimum(
-            labels=labels_temp,
+    test_dataset = HyperspectralDataset(dataset_test_tensor, labels_test_tensor.unsqueeze(1), pca_test_tensor)
+
+    return train_dataset, test_dataset
+
+
+def get_datasets_as_patches(dataset: np.ndarray, ground_truth: np.ndarray, pca: np.ndarray, stratified: bool,
+                            train_size: int = 215, patch_size: int = 5) -> tuple[Dataset, Dataset]:
+
+    h, w, c = dataset.shape
+    pad = patch_size // 2   # e.g. 5//2 = 2
+
+    padded_cube = np.pad(dataset, pad_width=((pad, pad), (pad, pad), (0, 0)), mode='constant', constant_values=0)
+
+    gt_flat = ground_truth.flatten()
+
+    coords_all = np.argwhere(ground_truth != 0)
+
+    gt_zero_based = gt_flat.astype(np.int64) - 1
+
+    valid_indices_flat = (coords_all[:, 0] * w + coords_all[:, 1]).astype(np.int64)
+
+    if stratified:
+        strat_idx = stratified_sample_minimum(
+            labels=gt_zero_based[valid_indices_flat],
             min_per_class=3,
-            total_samples=val_size,
-            random_state=random_state
+            total_samples=train_size
         )
-        test_idx = np.setdiff1d(np.arange(len(dataset_temp)), valid_idx)
-
-        dataset_val = dataset_temp_tensor[valid_idx]
-        labels_val = labels_temp_tensor[valid_idx].unsqueeze(1)
-
-        dataset_test = dataset_temp_tensor[test_idx]
-        labels_test = labels_temp_tensor[test_idx].unsqueeze(1)
-
-        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor.unsqueeze(1))
-        test_dataset = HyperspectralDataset(dataset_test, labels_test)
-        val_dataset = HyperspectralDataset(dataset_val, labels_val)
-
-        return train_dataset, temp_dataset, test_dataset, val_dataset
+        train_flat_indices = valid_indices_flat[strat_idx]
     else:
-        dataset_test = dataset_temp_tensor
-        labels_test = labels_temp_tensor.unsqueeze(1)
+        rng = np.random.default_rng()
+        choice = rng.choice(len(valid_indices_flat), size=train_size, replace=False)
+        train_flat_indices = valid_indices_flat[choice]
 
-        temp_dataset = HyperspectralDataset(dataset_temp_tensor, labels_temp_tensor.unsqueeze(1))
-        test_dataset = HyperspectralDataset(dataset_test, labels_test)
+    test_flat_indices = np.setdiff1d(valid_indices_flat, train_flat_indices)
 
-        return train_dataset, temp_dataset, test_dataset
+    def extract_patch(flat_idx: int) -> np.ndarray:
+        i = flat_idx // w
+        j = flat_idx % w
+        i_pad = i + pad
+        j_pad = j + pad
+
+        patch = padded_cube[ (i_pad - pad):(i_pad + pad + 1), (j_pad - pad):(j_pad + pad + 1), :]
+        return patch  # (patch_size, patch_size, C)
+
+    train_patches = []
+    train_labels = []
+    train_pcas = []
+
+    for flat_idx in train_flat_indices:
+        patch = extract_patch(flat_idx)  # (patch_size, patch_size, C)
+        train_patches.append(patch)
+        train_labels.append(int(gt_zero_based[flat_idx]))
+        train_pcas.append(pca[flat_idx])
+
+    train_patches = np.stack(train_patches, axis=0)  # shape = (train_size, patch_size, patch_size, C)
+    train_labels = np.array(train_labels, dtype=np.int64)  # (train_size,)
+    train_pcas = np.stack(train_pcas, axis=0)
+
+    test_patches = []
+    test_labels = []
+    test_pcas = []
+
+    for flat_idx in test_flat_indices:
+        patch = extract_patch(flat_idx)
+        test_patches.append(patch)
+        test_labels.append(int(gt_zero_based[flat_idx]))
+        test_pcas.append(pca[flat_idx])
+
+    test_patches = np.stack(test_patches, axis=0)  # (N_test, patch_size, patch_size, C)
+    test_labels = np.array(test_labels, dtype=np.int64)  # (N_test,)
+    test_pcas = np.stack(test_pcas, axis=0)
+
+    train_patches_tensor = torch.from_numpy(train_patches).float().permute(0, 3, 1, 2).unsqueeze(1)
+    # (train_size, 1, C, patch_size, patch_size)
+
+    train_labels_tensor = torch.from_numpy(train_labels).long()
+    train_pcas_tensor = torch.from_numpy(train_pcas).float()
+
+    test_patches_tensor = torch.from_numpy(test_patches).float().permute(0, 3, 1, 2).unsqueeze(1)
+    test_labels_tensor = torch.from_numpy(test_labels).long()
+    test_pcas_tensor = torch.from_numpy(test_pcas).float()
+
+    train_dataset = HyperspectralDataset(train_patches_tensor, train_labels_tensor.unsqueeze(1), train_pcas_tensor)
+    test_dataset = HyperspectralDataset(test_patches_tensor,  test_labels_tensor.unsqueeze(1),  test_pcas_tensor)
+
+    return train_dataset, test_dataset

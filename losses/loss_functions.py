@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 
 
-def get_gp(real: Tensor, fake: Tensor, disc: nn.Module, alpha: Tensor, gamma: float) -> Tensor:
+def get_gp(real: Tensor, fake: Tensor, disc: nn.Module, alpha: Tensor, gamma: float, device: str) -> Tensor:
     """
     Computes the gradient penalty for WGAN-GP.
 
@@ -18,19 +18,18 @@ def get_gp(real: Tensor, fake: Tensor, disc: nn.Module, alpha: Tensor, gamma: fl
         Tensor: The gradient penalty term.
     """
     mix_images = real * alpha + fake * (1 - alpha)
+    mix_images.requires_grad_()
     mix_scores = disc(mix_images)
 
     gradient = torch.autograd.grad(
         inputs=mix_images,
         outputs=mix_scores,
-        grad_outputs=torch.ones_like(mix_scores),
-        retain_graph=True,
+        grad_outputs=torch.ones_like(mix_scores, device=device),
         create_graph=True
     )[0]
 
-    gradient = gradient.view(len(gradient), -1)
-    gradient_norm = gradient.norm(2, dim=1)
-    gp = gamma * ((gradient_norm - 1) ** 2).mean()
+    gp = ((gradient.view(len(gradient), -1).norm(2, dim=1) - 1) ** 2).mean()
+
     return gp
 
 
@@ -41,10 +40,15 @@ def disc_loss(real: Tensor, fake: Tensor, disc: nn.Module, gamma: int or float, 
         tensor: discriminator_loss
     """
     alpha = torch.rand(len(real), 1, 1, device=device, requires_grad=True)
+    gp = get_gp(real, fake, disc, alpha, gamma, device)
+
     disc_real_pred = disc(real)
-    disc_fake_pred = disc(fake.detach())
-    gp = get_gp(real, fake.detach(), disc, alpha, gamma)
-    disc_loss = disc_fake_pred.mean() - disc_real_pred.mean() + gp
+    disc_fake_pred = disc(fake)
+    disc_loss = disc_fake_pred.mean() - disc_real_pred.mean() + gamma * gp
+
+    with torch.no_grad():
+        print(f"D(real)={disc_real_pred.mean():.3f}  D(fake)={disc_fake_pred.mean():.3f}  GP={gp.item():.3f}")
+
     return disc_loss
 
 
@@ -56,6 +60,10 @@ def gen_loss(fake: Tensor, disc: nn.Module) -> Tensor:
         """
     disc_fake_pred = disc(fake)
     gen_loss = -disc_fake_pred.mean()
+
+    with torch.no_grad():
+        print(f"D(fake) for G={disc_fake_pred.mean():.3f}")
+
     return gen_loss
 
 

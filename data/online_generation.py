@@ -10,7 +10,7 @@ import numpy as np
 def generate(gen: Module, dataset: Dataset, num_full_passes: int, batch_size: int, mode: str, enc: Module or None,
              device: str, folder_name: str):
 
-    Path(f"experiments/{folder_name}/online").mkdir(parents=True, exist_ok=True)
+    Path(f"experiments/{folder_name}").mkdir(parents=True, exist_ok=True)
     all_data = []
     label_data = []
 
